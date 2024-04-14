@@ -2,6 +2,14 @@ use anyhow::{bail, Result};
 use std::fs::File;
 use std::io::prelude::*;
 
+macro_rules! field_decoder {
+    ($type:ty; $name:ident) => {
+        pub fn $name(&self) -> $type {
+            <$type>::from_be_bytes(self.$name)
+        }
+    };
+}
+
 /// https://www.sqlite.org/fileformat.html#the_database_header
 #[repr(C)]
 #[repr(packed)]
@@ -26,7 +34,7 @@ struct DBHeader {
     /// File change counter.
     file_change_counter: [u8; 4],
     /// Size of the database file in pages. The "in-header database size".
-    db_size: [u8; 4],
+    in_header_db_size: [u8; 4],
     /// Page number of the first freelist trunk page.
     first_freelist_trunk_page: [u8; 4],
     /// Total number of freelist pages.
@@ -59,13 +67,47 @@ impl DBHeader {
     const SIZE: usize = 100;
 
     pub fn ref_from_bytes(data: &[u8; Self::SIZE]) -> &Self {
-        let header = &data[..Self::SIZE] as *const [u8] as *const DBHeader;
+        let header = &data[..Self::SIZE] as *const [u8] as *const Self;
         unsafe { &*header }
     }
 
-    pub fn page_size(&self) -> u16 {
-        u16::from_be_bytes(self.page_size)
+    field_decoder!{u16; page_size}
+}
+
+/// https://www.sqlite.org/fileformat.html#b_tree_pages
+#[repr(C)]
+#[repr(packed)]
+struct BTreePageHeader {
+    /// The one-byte flag at offset 0 indicating the b-tree page type.
+    ///
+    ///   * A value of 2 (0x02) means the page is an interior index b-tree page.
+    ///   * A value of 5 (0x05) means the page is an interior table b-tree page.
+    ///   * A value of 10 (0x0a) means the page is a leaf index b-tree page.
+    ///   * A value of 13 (0x0d) means the page is a leaf table b-tree page.
+    ///
+    /// Any other value for the b-tree page type is an error.
+    page_type: u8,
+    /// The two-byte integer at offset 1 gives the start of the first freeblock on the page, or is zero if there are no freeblocks.
+    first_freeblock: [u8; 2],
+    /// The two-byte integer at offset 3 gives the number of cells on the page.
+    num_cells: [u8; 2],
+    /// The two-byte integer at offset 5 designates the start of the cell content area. A zero value for this integer is interpreted as 65536.
+    cell_content_start: [u8; 2],
+    /// The one-byte integer at offset 7 gives the number of fragmented free bytes within the cell content area.
+    num_fragmented_free_bytes: u8,
+    /// The four-byte page number at offset 8 is the right-most pointer. This value appears in the header of interior b-tree pages only and is omitted from all other pages.
+    right_pinter: [u8; 4],
+}
+
+impl BTreePageHeader {
+    const SIZE: usize = 12;
+
+    pub fn ref_from_bytes(data: &[u8; Self::SIZE]) -> &Self {
+        let header = &data[..Self::SIZE] as *const [u8] as *const Self;
+        unsafe { &*header }
     }
+
+    field_decoder!{u16; num_cells}
 }
 
 fn main() -> Result<()> {
@@ -87,8 +129,13 @@ fn main() -> Result<()> {
 
             let header = DBHeader::ref_from_bytes(&header);
 
-            // Uncomment this block to pass the first stage
             println!("database page size: {}", header.page_size());
+
+            let mut page_header = [0; BTreePageHeader::SIZE];
+            file.read_exact(&mut page_header)?;
+            let page_header = BTreePageHeader::ref_from_bytes(&page_header);
+
+            println!("number of tables: {}", page_header.num_cells())
         }
         _ => bail!("Missing or invalid command passed: {}", command),
     }
