@@ -5,7 +5,7 @@ use crate::serial_value::SerialValue;
 use crate::sql::sql::sql_statement;
 use crate::sql::Statement;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 enum ObjectType {
     Table,
     Index,
@@ -25,7 +25,7 @@ impl ObjectType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct SchemaObject {
     object_type: ObjectType,

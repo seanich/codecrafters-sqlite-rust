@@ -12,14 +12,14 @@ pub struct CreateStatement {
     pub columns: Vec<String>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct SelectStatement {
     pub select: Vec<String>,
     pub from: String,
     pub where_clause: Option<WhereClause>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct WhereClause {
     pub column: String,
     pub value: String,
@@ -60,7 +60,7 @@ peg::parser! {
         rule column() -> String = n:(ident()) _ ident() (_ ident())* { n }
 
         rule ident() -> String
-        = chars:$(alpha() [ '_' | '0'..='9']*) { chars.to_string() }
+        = "\""? chars:$(alpha() [ 'a'..='z' | 'A'..='Z' | '_' | '0'..='9']*) "\""? { chars.to_string() }
 
         rule alpha() -> String
         = chars:$(['a'..='z' | 'A'..='Z']+) { chars.to_string() }
@@ -130,7 +130,21 @@ fn select_with_where() {
                 value: String::from("Some Guy"),
             })
         }))
-    )
+    );
+
+    let statement = "SELECT id, name FROM superheroes WHERE eye_color = 'Pink Eyes'";
+
+    assert_eq!(
+        sql::sql_statement(statement),
+        Ok(Statement::Select(SelectStatement {
+            from: String::from("superheroes"),
+            select: vec![String::from("id"), String::from("name")],
+            where_clause: Some(WhereClause {
+                column: String::from("eye_color"),
+                value: String::from("Pink Eyes"),
+            })
+        }))
+    );
 }
 
 #[test]

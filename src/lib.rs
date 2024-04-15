@@ -3,11 +3,11 @@ use std::io::Read;
 use anyhow::Result;
 use byteorder::ReadBytesExt;
 
-mod btree_page;
+pub mod btree_page;
 pub mod db_file;
 mod db_header;
 mod macros;
-mod schema_object;
+pub mod schema_object;
 mod serial_value;
 pub mod sql;
 

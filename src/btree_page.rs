@@ -37,6 +37,13 @@ impl PageType {
 
 #[derive(Debug)]
 #[allow(dead_code)]
+pub struct InteriorCell {
+    pub left_child_page: u32,
+    row_id: u64,
+}
+
+#[derive(Debug)]
+#[allow(dead_code)]
 pub struct BTreePage {
     page_data: Vec<u8>,
 
@@ -44,7 +51,7 @@ pub struct BTreePage {
     db_header: Option<DBHeader>,
 
     // Page header content
-    page_type: PageType,
+    pub page_type: PageType,
     first_freeblock: u16,
     pub num_cells: u16,
     cell_content_start: u16,
@@ -91,11 +98,37 @@ impl BTreePage {
         })
     }
 
+    pub fn read_interior_cell(&self, data: &[u8]) -> Result<InteriorCell> {
+        let mut reader = Cursor::new(data);
+        let left_child_page = reader
+            .read_u32::<BigEndian>()
+            .context("read left child pointer")?;
+        let row_id = reader.read_varint().context("read row ID")?;
+
+        Ok(InteriorCell {
+            left_child_page,
+            row_id,
+        })
+    }
+
+    pub fn read_interior_cells(&self) -> Result<Vec<InteriorCell>> {
+        let num_ptrs = self.cell_pointers.len();
+        let mut result = Vec::with_capacity(num_ptrs);
+        for &cp in &self.cell_pointers {
+            let cell_data = &self.page_data[cp as usize..];
+            let cell = self
+                .read_interior_cell(cell_data)
+                .context("reading cell data")?;
+            result.push(cell);
+        }
+        Ok(result)
+    }
+
     pub fn read_cell(&self, data: &[u8]) -> Result<Vec<SerialValue>> {
         let mut reader = Cursor::new(data);
 
         let _payload_size = reader.read_varint().context("read payload size")?;
-        let _row_id = reader.read_varint().context("read row ID")?;
+        let row_id = reader.read_varint().context("read row ID")?;
 
         let header_start = reader.stream_position()?;
         let header_size = reader.read_varint().context("read header size")?;
@@ -114,20 +147,20 @@ impl BTreePage {
             values.push(SerialValue::read(st, &mut reader).context("reading serial value")?)
         }
 
+        // FIXME: This is a terrible hack. I should actually figure out when it's appropriate to
+        // substitute the rowid value for the ID column.
+        if let SerialValue::Null = values[0] {
+            values[0] = SerialValue::Int64(row_id as i64);
+        }
+
         Ok(values)
     }
 
     pub fn read_cells(&self) -> Result<Vec<Vec<SerialValue>>> {
-        let mut result = Vec::with_capacity(self.cell_pointers.len());
-        for i in 0..self.cell_pointers.len() {
-            let cell_data = match i {
-                // Cell pointers are in descending order
-                0 => &self.page_data[self.cell_pointers[0] as usize..],
-                _ => {
-                    &self.page_data
-                        [self.cell_pointers[i] as usize..self.cell_pointers[i - 1] as usize]
-                }
-            };
+        let num_ptrs = self.cell_pointers.len();
+        let mut result = Vec::with_capacity(num_ptrs);
+        for &cp in &self.cell_pointers {
+            let cell_data = &self.page_data[cp as usize..];
             let cell = self.read_cell(cell_data).context("reading cell data")?;
             result.push(cell);
         }

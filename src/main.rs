@@ -2,9 +2,11 @@ use std::fs::File;
 
 use anyhow::{bail, Context, Ok, Result};
 use itertools::Itertools;
+use sqlite_starter_rust::btree_page::{BTreePage, PageType};
 use sqlite_starter_rust::db_file::DBFile;
+use sqlite_starter_rust::schema_object::SchemaObject;
 use sqlite_starter_rust::sql::sql::sql_statement;
-use sqlite_starter_rust::sql::Statement;
+use sqlite_starter_rust::sql::{SelectStatement, Statement};
 
 const SQLITE_TABLE_PREFIX: &str = "sqlite_";
 
@@ -58,10 +60,6 @@ fn main() -> Result<()> {
                             .schema_for_table(&s.from)
                             .context("loading table schema")?;
 
-                        let column_map = schema.column_map().context("retrieving column order")?;
-                        let column_indices: Vec<usize> =
-                            s.select.iter().map(|col| column_map[col]).collect();
-
                         let root_page = db_file
                             .load_page_at(
                                 schema
@@ -70,31 +68,70 @@ fn main() -> Result<()> {
                             )
                             .context("loading root page for table")?;
 
-                        let cells = root_page
-                            .read_cells()
-                            .context("reading cells from root page")?;
-
-                        let (where_column_ind, where_value) = match &s.where_clause {
-                            Some(where_clause) => (
-                                column_map.get(&where_clause.column),
-                                Some(where_clause.value.as_str()),
-                            ),
-                            None => (None, None),
-                        };
-
-                        for cell in cells {
-                            if let Some(&ind) = where_column_ind {
-                                if !&cell[ind].to_string().eq(where_value.unwrap()) {
-                                    continue;
-                                }
-                            }
-                            println!("{}", column_indices.iter().map(|&i| &cell[i]).join("|"));
-                        }
+                        return execute_select(&mut db_file, &schema, root_page, &s);
                     }
                 }
                 Statement::Create(_) => bail!("create statements not supported"),
             }
         }
+    }
+
+    Ok(())
+}
+
+fn execute_select(
+    db_file: &mut DBFile,
+    schema: &SchemaObject,
+    root_page: BTreePage,
+    select_statement: &SelectStatement,
+) -> Result<()> {
+    match root_page.page_type {
+        PageType::LeafTable => {
+            let column_map = schema.column_map().context("retrieving column order")?;
+            let column_indices: Vec<usize> = select_statement
+                .select
+                .iter()
+                .map(|col| column_map[col])
+                .collect();
+
+            let cells = root_page
+                .read_cells()
+                .context("reading cells from root page")?;
+
+            let (where_column_ind, where_value) = match &select_statement.where_clause {
+                Some(where_clause) => (
+                    column_map.get(&where_clause.column),
+                    Some(where_clause.value.as_str()),
+                ),
+                None => (None, None),
+            };
+
+            for cell in cells {
+                if cell.len() == 0 {
+                    continue;
+                }
+
+                if let Some(&ind) = where_column_ind {
+                    if !&cell[ind].to_string().eq(where_value.unwrap()) {
+                        continue;
+                    }
+                }
+                println!("{}", column_indices.iter().map(|&i| &cell[i]).join("|"));
+            }
+        }
+        PageType::InteriorTable => {
+            let cells = root_page
+                .read_interior_cells()
+                .context("reading interior cells")?;
+
+            for cell in cells {
+                let page = db_file
+                    .load_page_at(cell.left_child_page as usize)
+                    .context("loading page")?;
+                execute_select(db_file, schema, page, select_statement).context("dumping page")?;
+            }
+        }
+        _ => bail!("unhandled page type"),
     }
 
     Ok(())
