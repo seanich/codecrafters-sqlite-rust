@@ -1,11 +1,8 @@
-use std::io::{Cursor, Seek};
-
 use anyhow::{bail, Context, Result};
 
 use crate::serial_value::SerialValue;
 use crate::sql::sql::sql_statement;
 use crate::sql::Statement;
-use crate::ReadVarint;
 
 #[derive(Debug)]
 enum ObjectType {
@@ -38,23 +35,7 @@ pub struct SchemaObject {
 }
 
 impl SchemaObject {
-    pub fn from(data: &[u8]) -> Result<Self> {
-        let mut reader = Cursor::new(data);
-
-        let _payload_size = reader.read_varint().context("read payload size")?;
-        let _row_id = reader.read_varint().context("read row ID")?;
-
-        let header_start = reader.stream_position()?;
-        let header_size = reader.read_varint().context("read header size")?;
-
-        // Encoded as serial types https://www.sqlite.org/fileformat.html#record_format
-        let mut column_serial_types = Vec::new();
-        while reader.stream_position()? < header_start + header_size {
-            let column_type = reader
-                .read_varint()
-                .context("read column serial type varint")?;
-            column_serial_types.push(column_type);
-        }
+    pub fn from(cell: Vec<SerialValue>) -> Result<Self> {
         // We're only handling the schema table here. Columns should be ordered as follows:
         //
         //      CREATE TABLE sqlite_schema(
@@ -67,44 +48,34 @@ impl SchemaObject {
         //
         // https://www.sqlite.org/fileformat.html#storage_of_the_sql_database_schema
         assert_eq!(
-            column_serial_types.len(),
+            cell.len(),
             5,
             "should have exactly 5 columns for schema table"
         );
 
-        let object_type = match SerialValue::read(column_serial_types[0], &mut reader)
-            .context("reading object_type value")?
-        {
-            SerialValue::Text(value) => ObjectType::from(&value)?,
+        let object_type = match &cell[0] {
+            SerialValue::Text(value) => ObjectType::from(value)?,
             _ => bail!("unexpected serial value for object_type"),
         };
 
-        let name = match SerialValue::read(column_serial_types[1], &mut reader)
-            .context("reading name value")?
-        {
-            SerialValue::Text(value) => value,
+        let name = match &cell[1] {
+            SerialValue::Text(value) => value.to_string(),
             _ => bail!("unexpected serial value for name"),
         };
 
-        let table_name = match SerialValue::read(column_serial_types[2], &mut reader)
-            .context("reading table_name value")?
-        {
-            SerialValue::Text(value) => value,
+        let table_name = match &cell[2] {
+            SerialValue::Text(value) => value.to_string(),
             _ => bail!("unexpected serial value for table_name"),
         };
 
-        let root_page = match SerialValue::read(column_serial_types[3], &mut reader)
-            .context("reading root_page value")?
-        {
+        let root_page = match &cell[3] {
             SerialValue::Null => None,
-            SerialValue::Int8(value) => Some(value as usize),
+            SerialValue::Int8(value) => Some(*value as usize),
             _ => bail!("unexpected serial value for root_page"),
         };
 
-        let sql = match SerialValue::read(column_serial_types[4], &mut reader)
-            .context("reading sql value")?
-        {
-            SerialValue::Text(value) => value,
+        let sql = match &cell[4] {
+            SerialValue::Text(value) => value.to_string(),
             _ => bail!("unexpected serial value for sql"),
         };
 

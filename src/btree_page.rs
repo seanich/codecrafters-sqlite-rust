@@ -136,16 +136,9 @@ impl BTreePage {
 
     pub fn load_schemas(&self) -> Result<Vec<SchemaObject>> {
         let mut result = Vec::with_capacity(self.cell_pointers.len());
-        for i in 0..self.cell_pointers.len() {
-            let cell_data = match i {
-                // Cell pointers are in descending order
-                0 => &self.page_data[self.cell_pointers[0] as usize..],
-                _ => {
-                    &self.page_data
-                        [self.cell_pointers[i] as usize..self.cell_pointers[i - 1] as usize]
-                }
-            };
-            result.push(SchemaObject::from(cell_data).context("construct schema object")?);
+        let cells = self.read_cells().context("reading schema cells")?;
+        for cell in cells {
+            result.push(SchemaObject::from(cell).context("construct schema object")?);
         }
         Ok(result)
     }
