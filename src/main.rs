@@ -1,6 +1,6 @@
 use std::fs::File;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Ok, Result};
 use itertools::Itertools;
 use sqlite_starter_rust::db_file::DBFile;
 use sqlite_starter_rust::sql::sql::sql_statement;
@@ -46,25 +46,34 @@ fn main() -> Result<()> {
                     let mut file = File::open(&args[1])?;
                     let mut db_file = DBFile::new(&mut file).context("constructing DBFile")?;
 
-                    if s.select.len() != 1 {
-                        bail!("only single column select is supported")
-                    }
-
                     if s.select.len() == 1 && s.select[0].eq_ignore_ascii_case("count(*)") {
+                        // Count
                         let row_count = db_file
                             .row_count(&s.from)
                             .context("finding row count for table")?;
                         println!("{}", row_count);
                     } else {
+                        // Regular select
                         let schema = db_file
                             .schema_for_table(&s.from)
                             .context("loading table schema")?;
+
                         let columns = schema.column_order().context("retrieving column order")?;
 
-                        let (column_i, _) = columns
+                        let column_indices: Vec<usize> = s
+                            .select
                             .into_iter()
-                            .find_position(|c| c.eq(&s.select[0]))
-                            .context("finding column index")?;
+                            .map(|col| {
+                                match columns
+                                    .iter()
+                                    .find_position(|c| c.eq_ignore_ascii_case(&col))
+                                {
+                                    Some((i, _)) => Ok(i),
+                                    None => Err(anyhow!("column not found")),
+                                }
+                            })
+                            .flatten()
+                            .collect();
 
                         let root_page = db_file
                             .load_page_at(
@@ -79,7 +88,7 @@ fn main() -> Result<()> {
                             .context("reading cells from root page")?;
 
                         for cell in cells {
-                            println!("{}", cell[column_i]);
+                            println!("{}", column_indices.iter().map(|&i| &cell[i]).join("|"));
                         }
                     }
                 }
