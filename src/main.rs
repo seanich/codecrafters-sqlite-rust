@@ -1,79 +1,17 @@
 use std::fs::File;
-use std::io::prelude::*;
-use std::io::SeekFrom;
 
 use anyhow::{bail, Context, Result};
 
-use crate::btree_page::BTreePage;
-use crate::db_header::DBHeader;
+use crate::db_file::DBFile;
 
 mod btree_page;
+mod db_file;
 mod db_header;
 mod macros;
 mod schema_object;
 mod serial_value;
 
 const SQLITE_TABLE_PREFIX: &str = "sqlite_";
-
-struct DBFile<'a> {
-    file: &'a mut File,
-
-    header: DBHeader,
-    first_page: BTreePage,
-}
-
-impl<'a> DBFile<'a> {
-    pub fn new(file: &'a mut File) -> Result<Self> {
-        let mut header = [0; DBHeader::SIZE];
-        file.read_exact(&mut header)?;
-        let db_header = DBHeader::from_bytes(&header).expect("should parse header");
-
-        // Seek back to the start of the file
-        file.seek(SeekFrom::Start(0))?;
-
-        let mut page = vec![0u8; db_header.page_size() as usize];
-        file.read_exact(&mut page)?;
-        let page = BTreePage::new(&page, Some(db_header)).expect("should construct BTree page");
-
-        return Ok(Self {
-            file,
-            header: db_header,
-            first_page: page,
-        });
-    }
-
-    pub(crate) fn row_count(&mut self, table_name: &str) -> Result<usize> {
-        let page_size = self.header.page_size() as u64;
-
-        // Find the table schema
-        let table_schema = match self
-            .first_page
-            .load_schemas()
-            .context("loading schemas")?
-            .into_iter()
-            .find(|s| s.table_name == table_name)
-        {
-            Some(s) => s,
-            None => bail!("could not find table with name '{}'", table_name),
-        };
-
-        // Seek to page start
-        let page_offset = table_schema.root_page.context("getting root page offset")? - 1;
-        self.file
-            .seek(SeekFrom::Start(page_offset as u64 * page_size))
-            .context("seeking to root page offset")?;
-
-        // Load root page for table
-        let mut buf = vec![0u8; page_size as usize];
-        self.file
-            .read_exact(&mut buf)
-            .context("reading root page for table")?;
-        let page = BTreePage::new(&buf, None).context("building BTree page")?;
-
-        // Get number of cells (i.e. row count)
-        Ok(page.num_cells as usize)
-    }
-}
 
 fn main() -> Result<()> {
     // Parse arguments
