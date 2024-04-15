@@ -117,7 +117,10 @@ impl SchemaObject {
         })
     }
 
-    pub fn parse_create(&self) -> Result<Statement> {
-        sql_statement(&self.sql).context("parsing create table statement")
+    pub fn column_order(&self) -> Result<Vec<String>> {
+        match sql_statement(&self.sql).context("parsing create table statement")? {
+            Statement::Create(create_statement) => Ok(create_statement.columns),
+            _ => bail!("invalid create statement"),
+        }
     }
 }

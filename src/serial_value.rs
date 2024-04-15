@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use std::fmt::{Display, Formatter};
 use std::io::Read;
 
 use byteorder::{BigEndian, ReadBytesExt};
@@ -49,6 +50,23 @@ impl SerialValue {
                 String::from_utf8(bytes).context("text bytes into String")?
             })),
             _ => unreachable!(),
+        }
+    }
+}
+
+impl Display for SerialValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Null => write!(f, "(null)"),
+            Self::Zero => write!(f, "0"),
+            Self::One => write!(f, "1"),
+            Self::Int8(i) => write!(f, "{}", i),
+            Self::Int16(i) => write!(f, "{}", i),
+            Self::Int24(i) | Self::Int32(i) => write!(f, "{}", i),
+            Self::Int48(i) | Self::Int64(i) => write!(f, "{}", i),
+            Self::Float64(n) => write!(f, "{}", n),
+            Self::Text(t) => write!(f, "{}", t),
+            Self::Blob(v) => write!(f, "{:?}", v),
         }
     }
 }

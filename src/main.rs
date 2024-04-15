@@ -1,6 +1,7 @@
 use std::fs::File;
 
 use anyhow::{bail, Context, Result};
+use itertools::Itertools;
 use sqlite_starter_rust::db_file::DBFile;
 use sqlite_starter_rust::sql::sql::sql_statement;
 use sqlite_starter_rust::sql::Statement;
@@ -45,11 +46,41 @@ fn main() -> Result<()> {
                     let mut file = File::open(&args[1])?;
                     let mut db_file = DBFile::new(&mut file).context("constructing DBFile")?;
 
+                    if s.select.len() != 1 {
+                        bail!("only single column select is supported")
+                    }
+
                     if s.select.len() == 1 && s.select[0].eq_ignore_ascii_case("count(*)") {
                         let row_count = db_file
                             .row_count(&s.from)
                             .context("finding row count for table")?;
                         println!("{}", row_count);
+                    } else {
+                        let schema = db_file
+                            .schema_for_table(&s.from)
+                            .context("loading table schema")?;
+                        let columns = schema.column_order().context("retrieving column order")?;
+
+                        let (column_i, _) = columns
+                            .into_iter()
+                            .find_position(|c| c.eq(&s.select[0]))
+                            .context("finding column index")?;
+
+                        let root_page = db_file
+                            .load_page_at(
+                                schema
+                                    .root_page
+                                    .context("getting root page from table schema")?,
+                            )
+                            .context("loading root page for table")?;
+
+                        let cells = root_page
+                            .read_cells()
+                            .context("reading cells from root page")?;
+
+                        for cell in cells {
+                            println!("{}", cell[column_i]);
+                        }
                     }
                 }
                 Statement::Create(_) => bail!("create statements not supported"),

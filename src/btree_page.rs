@@ -5,6 +5,8 @@ use byteorder::{BigEndian, ReadBytesExt};
 
 use crate::db_header::DBHeader;
 use crate::schema_object::SchemaObject;
+use crate::serial_value::SerialValue;
+use crate::ReadVarint;
 
 #[derive(Debug)]
 pub enum PageType {
@@ -87,6 +89,49 @@ impl BTreePage {
             right_most_pointer,
             cell_pointers,
         })
+    }
+
+    pub fn read_cell(&self, data: &[u8]) -> Result<Vec<SerialValue>> {
+        let mut reader = Cursor::new(data);
+
+        let _payload_size = reader.read_varint().context("read payload size")?;
+        let _row_id = reader.read_varint().context("read row ID")?;
+
+        let header_start = reader.stream_position()?;
+        let header_size = reader.read_varint().context("read header size")?;
+
+        // Encoded as serial types https://www.sqlite.org/fileformat.html#record_format
+        let mut column_serial_types = Vec::new();
+        while reader.stream_position()? < header_start + header_size {
+            let column_type = reader
+                .read_varint()
+                .context("read column serial type varint")?;
+            column_serial_types.push(column_type);
+        }
+
+        let mut values = Vec::with_capacity(column_serial_types.len());
+        for st in column_serial_types {
+            values.push(SerialValue::read(st, &mut reader).context("reading serial value")?)
+        }
+
+        Ok(values)
+    }
+
+    pub fn read_cells(&self) -> Result<Vec<Vec<SerialValue>>> {
+        let mut result = Vec::with_capacity(self.cell_pointers.len());
+        for i in 0..self.cell_pointers.len() {
+            let cell_data = match i {
+                // Cell pointers are in descending order
+                0 => &self.page_data[self.cell_pointers[0] as usize..],
+                _ => {
+                    &self.page_data
+                        [self.cell_pointers[i] as usize..self.cell_pointers[i - 1] as usize]
+                }
+            };
+            let cell = self.read_cell(cell_data).context("reading cell data")?;
+            result.push(cell);
+        }
+        Ok(result)
     }
 
     pub fn load_schemas(&self) -> Result<Vec<SchemaObject>> {
