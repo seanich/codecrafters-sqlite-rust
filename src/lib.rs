@@ -3,6 +3,14 @@ use std::io::Read;
 use anyhow::Result;
 use byteorder::ReadBytesExt;
 
+mod btree_page;
+pub mod db_file;
+mod db_header;
+mod macros;
+mod schema_object;
+mod serial_value;
+mod sql;
+
 pub trait ReadVarint<T> {
     fn read_varint(&mut self) -> Result<u64>;
 }

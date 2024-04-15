@@ -2,9 +2,8 @@ use std::io::{Cursor, Seek};
 
 use anyhow::{bail, Context, Result};
 
-use sqlite_starter_rust::ReadVarint;
-
 use crate::serial_value::SerialValue;
+use crate::ReadVarint;
 
 #[derive(Debug)]
 enum ObjectType {

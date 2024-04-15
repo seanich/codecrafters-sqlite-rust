@@ -1,15 +1,7 @@
 use std::fs::File;
 
 use anyhow::{bail, Context, Result};
-
-use crate::db_file::DBFile;
-
-mod btree_page;
-mod db_file;
-mod db_header;
-mod macros;
-mod schema_object;
-mod serial_value;
+use sqlite_starter_rust::db_file::DBFile;
 
 const SQLITE_TABLE_PREFIX: &str = "sqlite_";
 
