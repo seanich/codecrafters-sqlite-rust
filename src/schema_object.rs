@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use std::collections::HashMap;
 
 use crate::serial_value::SerialValue;
 use crate::sql::sql::sql_statement;
@@ -93,5 +94,15 @@ impl SchemaObject {
             Statement::Create(create_statement) => Ok(create_statement.columns),
             _ => bail!("invalid create statement"),
         }
+    }
+
+    pub fn column_map(&self) -> Result<HashMap<String, usize>> {
+        Ok(self
+            .column_order()
+            .context("retrieving column order")?
+            .iter()
+            .enumerate()
+            .map(|(ind, col)| (col.clone(), ind))
+            .collect::<HashMap<_, _>>())
     }
 }

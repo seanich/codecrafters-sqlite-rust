@@ -16,6 +16,13 @@ pub struct CreateStatement {
 pub struct SelectStatement {
     pub select: Vec<String>,
     pub from: String,
+    pub where_clause: Option<WhereClause>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct WhereClause {
+    pub column: String,
+    pub value: String,
 }
 
 peg::parser! {
@@ -24,11 +31,20 @@ peg::parser! {
         = _ s:(select_statement() / create_table_statement()) _ { s }
 
         rule select_statement() -> Statement
-        = i("SELECT") _ fields:(select() ++ ("," _)) _ i("FROM") _ from:ident() {
+        = i("SELECT") _ fields:(select() ++ ("," _)) _ i("FROM") _ from:ident() _ w:(where_clause())? {
             Statement::Select(SelectStatement {
                 select: fields,
                 from,
+                where_clause: w,
             })
+        }
+
+        rule where_clause() -> WhereClause
+        = i("WHERE") _ column:(ident()) _ "=" _ "'" value:$([^'\'']*) "'" {
+            WhereClause {
+                column,
+                value: String::from(value),
+            }
         }
 
         rule create_table_statement() -> Statement
@@ -70,7 +86,8 @@ fn select() {
         sql::sql_statement(statement),
         Ok(Statement::Select(SelectStatement {
             from: String::from("foobar"),
-            select: vec![String::from("id"), String::from("name")]
+            select: vec![String::from("id"), String::from("name")],
+            where_clause: None,
         }))
     )
 }
@@ -87,7 +104,31 @@ fn select_count() {
         sql::sql_statement(statement),
         Ok(Statement::Select(SelectStatement {
             from: String::from("foobar"),
-            select: vec![String::from("COUNT(*)")]
+            select: vec![String::from("COUNT(*)")],
+            where_clause: None,
+        }))
+    )
+}
+
+#[test]
+fn select_with_where() {
+    let statement = r#"
+    SELECT
+        id,
+        name
+    FROM foobar
+    WHERE name = 'Some Guy'
+    "#;
+
+    assert_eq!(
+        sql::sql_statement(statement),
+        Ok(Statement::Select(SelectStatement {
+            from: String::from("foobar"),
+            select: vec![String::from("id"), String::from("name")],
+            where_clause: Some(WhereClause {
+                column: String::from("name"),
+                value: String::from("Some Guy"),
+            })
         }))
     )
 }

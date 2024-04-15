@@ -1,6 +1,6 @@
 use std::fs::File;
 
-use anyhow::{anyhow, bail, Context, Ok, Result};
+use anyhow::{bail, Context, Ok, Result};
 use itertools::Itertools;
 use sqlite_starter_rust::db_file::DBFile;
 use sqlite_starter_rust::sql::sql::sql_statement;
@@ -58,22 +58,9 @@ fn main() -> Result<()> {
                             .schema_for_table(&s.from)
                             .context("loading table schema")?;
 
-                        let columns = schema.column_order().context("retrieving column order")?;
-
-                        let column_indices: Vec<usize> = s
-                            .select
-                            .into_iter()
-                            .map(|col| {
-                                match columns
-                                    .iter()
-                                    .find_position(|c| c.eq_ignore_ascii_case(&col))
-                                {
-                                    Some((i, _)) => Ok(i),
-                                    None => Err(anyhow!("column not found")),
-                                }
-                            })
-                            .flatten()
-                            .collect();
+                        let column_map = schema.column_map().context("retrieving column order")?;
+                        let column_indices: Vec<usize> =
+                            s.select.iter().map(|col| column_map[col]).collect();
 
                         let root_page = db_file
                             .load_page_at(
@@ -87,7 +74,20 @@ fn main() -> Result<()> {
                             .read_cells()
                             .context("reading cells from root page")?;
 
+                        let (where_column_ind, where_value) = match &s.where_clause {
+                            Some(where_clause) => (
+                                column_map.get(&where_clause.column),
+                                Some(where_clause.value.as_str()),
+                            ),
+                            None => (None, None),
+                        };
+
                         for cell in cells {
+                            if let Some(&ind) = where_column_ind {
+                                if !&cell[ind].to_string().eq(where_value.unwrap()) {
+                                    continue;
+                                }
+                            }
                             println!("{}", column_indices.iter().map(|&i| &cell[i]).join("|"));
                         }
                     }
