@@ -2,6 +2,8 @@ use std::fs::File;
 
 use anyhow::{bail, Context, Result};
 use sqlite_starter_rust::db_file::DBFile;
+use sqlite_starter_rust::sql::sql::sql_statement;
+use sqlite_starter_rust::sql::Statement;
 
 const SQLITE_TABLE_PREFIX: &str = "sqlite_";
 
@@ -37,17 +39,21 @@ fn main() -> Result<()> {
             println!("{}", table_names.join(" "));
         }
         command => {
-            let (_, table_name) = command
-                .rsplit_once(" ")
-                .context("expected table name at end of command")?;
+            let statement = sql_statement(command).context("parsing SQL statement")?;
+            match statement {
+                Statement::Select(s) => {
+                    let mut file = File::open(&args[1])?;
+                    let mut db_file = DBFile::new(&mut file).context("constructing DBFile")?;
 
-            let mut file = File::open(&args[1])?;
-            let mut db_file = DBFile::new(&mut file).context("constructing DBFile")?;
-
-            let row_count = db_file
-                .row_count(table_name)
-                .context("finding row count for table")?;
-            println!("{}", row_count);
+                    if s.select.len() == 1 && s.select[0].eq_ignore_ascii_case("count(*)") {
+                        let row_count = db_file
+                            .row_count(&s.from)
+                            .context("finding row count for table")?;
+                        println!("{}", row_count);
+                    }
+                }
+                Statement::Create(_) => bail!("create statements not supported"),
+            }
         }
     }
 

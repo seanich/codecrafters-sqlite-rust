@@ -3,6 +3,8 @@ use std::io::{Cursor, Seek};
 use anyhow::{bail, Context, Result};
 
 use crate::serial_value::SerialValue;
+use crate::sql::sql::sql_statement;
+use crate::sql::Statement;
 use crate::ReadVarint;
 
 #[derive(Debug)]
@@ -113,5 +115,9 @@ impl SchemaObject {
             root_page,
             sql,
         })
+    }
+
+    pub fn parse_create(&self) -> Result<Statement> {
+        sql_statement(&self.sql).context("parsing create table statement")
     }
 }

@@ -1,7 +1,7 @@
 use crate::btree_page::BTreePage;
 use crate::db_header::DBHeader;
 use crate::schema_object::SchemaObject;
-use anyhow::{bail, Context, Error};
+use anyhow::{anyhow, bail, Context};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
@@ -38,7 +38,7 @@ impl<'a> DBFile<'a> {
             .context("loading schemas")?
             .into_iter()
             .find(|s| s.table_name == table_name)
-            .ok_or(Error::msg("failed to find table"))
+            .ok_or(anyhow!("failed to find table"))
     }
 
     fn seek_to_page(&mut self, page: usize) -> anyhow::Result<u64> {

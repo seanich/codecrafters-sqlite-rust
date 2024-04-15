@@ -9,7 +9,7 @@ mod db_header;
 mod macros;
 mod schema_object;
 mod serial_value;
-mod sql;
+pub mod sql;
 
 pub trait ReadVarint<T> {
     fn read_varint(&mut self) -> Result<u64>;
