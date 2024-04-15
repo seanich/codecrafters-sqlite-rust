@@ -1,8 +1,10 @@
 use std::io::{Cursor, Seek, SeekFrom};
 
-use crate::db_header::DBHeader;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use byteorder::{BigEndian, ReadBytesExt};
+
+use crate::db_header::DBHeader;
+use crate::schema_object::SchemaObject;
 
 #[derive(Debug)]
 pub enum PageType {
@@ -34,6 +36,8 @@ impl PageType {
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct BTreePage {
+    page_data: Vec<u8>,
+
     // Only populated for the first page
     db_header: Option<DBHeader>,
 
@@ -73,6 +77,7 @@ impl BTreePage {
         }
 
         Ok(Self {
+            page_data: data.to_vec(),
             db_header,
             page_type,
             first_freeblock,
@@ -82,5 +87,21 @@ impl BTreePage {
             right_most_pointer,
             cell_pointers,
         })
+    }
+
+    pub fn load_schemas(&self) -> Result<Vec<SchemaObject>> {
+        let mut result = Vec::with_capacity(self.cell_pointers.len());
+        for i in 0..self.cell_pointers.len() {
+            let cell_data = match i {
+                // Cell pointers are in descending order
+                0 => &self.page_data[self.cell_pointers[0] as usize..],
+                _ => {
+                    &self.page_data
+                        [self.cell_pointers[i] as usize..self.cell_pointers[i - 1] as usize]
+                }
+            };
+            result.push(SchemaObject::from(cell_data).context("construct schema object")?);
+        }
+        Ok(result)
     }
 }

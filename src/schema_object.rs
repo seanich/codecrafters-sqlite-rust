@@ -32,7 +32,7 @@ pub struct SchemaObject {
     object_type: ObjectType,
     name: String,
     pub table_name: String,
-    root_page: Option<usize>,
+    pub root_page: Option<usize>,
     sql: String,
 }
 
