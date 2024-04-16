@@ -311,9 +311,8 @@ fn search_index(db_file: &mut DBFile, page: BTreePage, query: &str) -> Result<Ve
                     bail!("invalid cell type")
                 };
 
-                let SerialValue::Text(cell_content) = &cell.columns[0] else {
-                    bail!("interior index cell content should be text")
-                };
+                // TODO: Handle checking types properly
+                let cell_content = &cell.columns[0].to_string();
 
                 let cell_content = cell_content.as_str();
                 let cell_cmp = cell_content.cmp(query);

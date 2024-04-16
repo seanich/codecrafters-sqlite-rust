@@ -62,6 +62,16 @@ impl SerialValue {
             _ => None,
         }
     }
+
+    pub fn as_usize(&self) -> Option<usize> {
+        match self {
+            Self::Int8(i) => Some(*i as usize),
+            Self::Int16(i) => Some(*i as usize),
+            Self::Int24(i) | Self::Int32(i) => Some(*i as usize),
+            Self::Int48(i) | Self::Int64(i) => Some(*i as usize),
+            _ => None,
+        }
+    }
 }
 
 impl Display for SerialValue {

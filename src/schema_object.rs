@@ -72,7 +72,10 @@ impl SchemaObject {
         let root_page = match &cell[3] {
             SerialValue::Null => None,
             SerialValue::Int8(value) => Some(*value as usize),
-            _ => bail!("unexpected serial value for root_page"),
+            v => match v.as_usize() {
+                Some(u) => Some(u),
+                None => bail!("unexpected serial value for root_page: {:?}", v),
+            },
         };
 
         let sql = match &cell[4] {
