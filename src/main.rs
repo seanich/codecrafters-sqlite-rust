@@ -188,9 +188,6 @@ fn select_without_index(db_file: &mut DBFile, page: BTreePage) -> Result<Vec<Vec
             // skip over the serial values for any columns we don't care about.
             let cells = page.read_cells().context("reading cells from root page")?;
             for cell in cells {
-                if cell.len() == 0 {
-                    continue;
-                }
                 result.push(cell)
             }
         }
@@ -205,6 +202,13 @@ fn select_without_index(db_file: &mut DBFile, page: BTreePage) -> Result<Vec<Vec
                 };
                 let page = db_file
                     .load_page_at(cell.left_child_page as usize)
+                    .context("loading page")?;
+                result.extend(select_without_index(db_file, page)?);
+            }
+
+            if let Some(right_ptr) = page.right_most_pointer {
+                let page = db_file
+                    .load_page_at(right_ptr as usize)
                     .context("loading page")?;
                 result.extend(select_without_index(db_file, page)?);
             }
