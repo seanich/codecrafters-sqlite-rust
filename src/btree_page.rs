@@ -1,6 +1,6 @@
-use std::io::{Cursor, Seek, SeekFrom};
+use std::io::{Cursor, Read, Seek, SeekFrom};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use byteorder::{BigEndian, ReadBytesExt};
 
 use crate::db_header::DBHeader;
@@ -36,10 +36,24 @@ impl PageType {
 }
 
 #[derive(Debug)]
+pub enum InteriorCell {
+    Table(InteriorTableCell),
+    Index(InteriorIndexCell),
+}
+
+#[derive(Debug)]
 #[allow(dead_code)]
-pub struct InteriorCell {
+pub struct InteriorTableCell {
     pub left_child_page: u32,
-    row_id: u64,
+    pub row_id: u64,
+}
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub struct InteriorIndexCell {
+    pub left_child_page: u32,
+    pub columns: Vec<SerialValue>,
+    pub rowid: u64,
 }
 
 #[derive(Debug)]
@@ -56,7 +70,7 @@ pub struct BTreePage {
     pub num_cells: u16,
     cell_content_start: u16,
     num_fragmented_free_bytes: u8,
-    right_most_pointer: Option<u32>,
+    pub right_most_pointer: Option<u32>,
 
     pub cell_pointers: Vec<u16>,
 }
@@ -103,12 +117,38 @@ impl BTreePage {
         let left_child_page = reader
             .read_u32::<BigEndian>()
             .context("read left child pointer")?;
-        let row_id = reader.read_varint().context("read row ID")?;
 
-        Ok(InteriorCell {
-            left_child_page,
-            row_id,
-        })
+        match self.page_type {
+            PageType::InteriorTable => {
+                let row_id = reader.read_varint().context("read rowid")?;
+                Ok(InteriorCell::Table(InteriorTableCell {
+                    left_child_page,
+                    row_id,
+                }))
+            }
+            PageType::InteriorIndex => {
+                let _payload_bytes = reader.read_varint().context("read payload bytes")?;
+
+                let payload = read_payload(&mut reader)?;
+
+                let Some((rowid, columns)) = payload.split_last() else {
+                    bail!("interior index cell should have at least two values")
+                };
+                let Some(rowid) = rowid.as_rowid() else {
+                    bail!("last interior index cell value must be a rowid")
+                };
+                let columns = columns.to_vec();
+
+                Ok(InteriorCell::Index(InteriorIndexCell {
+                    left_child_page,
+                    rowid,
+                    columns,
+                }))
+            }
+            PageType::LeafTable | PageType::LeafIndex => {
+                Err(anyhow!("cannot read interior cell from leaf page"))
+            }
+        }
     }
 
     pub fn read_interior_cells(&self) -> Result<Vec<InteriorCell>> {
@@ -128,29 +168,21 @@ impl BTreePage {
         let mut reader = Cursor::new(data);
 
         let _payload_size = reader.read_varint().context("read payload size")?;
-        let row_id = reader.read_varint().context("read row ID")?;
 
-        let header_start = reader.stream_position()?;
-        let header_size = reader.read_varint().context("read header size")?;
+        let row_id = match self.page_type {
+            PageType::LeafTable => Some(reader.read_varint().context("read row ID")?),
+            _ => None,
+        };
 
-        // Encoded as serial types https://www.sqlite.org/fileformat.html#record_format
-        let mut column_serial_types = Vec::new();
-        while reader.stream_position()? < header_start + header_size {
-            let column_type = reader
-                .read_varint()
-                .context("read column serial type varint")?;
-            column_serial_types.push(column_type);
-        }
-
-        let mut values = Vec::with_capacity(column_serial_types.len());
-        for st in column_serial_types {
-            values.push(SerialValue::read(st, &mut reader).context("reading serial value")?)
-        }
+        let mut values = read_payload(&mut reader)?;
 
         // FIXME: This is a terrible hack. I should actually figure out when it's appropriate to
         // substitute the rowid value for the ID column.
         if let SerialValue::Null = values[0] {
-            values[0] = SerialValue::Int64(row_id as i64);
+            match row_id {
+                Some(id) => values[0] = SerialValue::Int64(id as i64),
+                None => {}
+            }
         }
 
         Ok(values)
@@ -175,4 +207,28 @@ impl BTreePage {
         }
         Ok(result)
     }
+}
+
+fn read_payload<T>(reader: &mut T) -> Result<Vec<SerialValue>>
+where
+    T: Read + Seek,
+{
+    let header_start = reader.stream_position()?;
+    let header_size = reader.read_varint().context("read header size")?;
+
+    // Encoded as serial types https://www.sqlite.org/fileformat.html#record_format
+    let mut column_serial_types = Vec::new();
+    while reader.stream_position()? < header_start + header_size {
+        let column_type = reader
+            .read_varint()
+            .context("read column serial type varint")?;
+        column_serial_types.push(column_type);
+    }
+
+    let mut values = Vec::with_capacity(column_serial_types.len());
+    for st in column_serial_types {
+        values.push(SerialValue::read(st, reader).context("reading serial value")?)
+    }
+
+    Ok(values)
 }

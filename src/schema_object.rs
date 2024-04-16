@@ -5,8 +5,8 @@ use crate::serial_value::SerialValue;
 use crate::sql::sql::sql_statement;
 use crate::sql::Statement;
 
-#[derive(Debug, Clone, Copy)]
-enum ObjectType {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ObjectType {
     Table,
     Index,
     View,
@@ -28,11 +28,11 @@ impl ObjectType {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct SchemaObject {
-    object_type: ObjectType,
-    name: String,
+    pub object_type: ObjectType,
+    pub name: String,
     pub table_name: String,
     pub root_page: Option<usize>,
-    sql: String,
+    pub sql: String,
 }
 
 impl SchemaObject {
@@ -91,7 +91,7 @@ impl SchemaObject {
 
     pub fn column_order(&self) -> Result<Vec<String>> {
         match sql_statement(&self.sql).context("parsing create table statement")? {
-            Statement::Create(create_statement) => Ok(create_statement.columns),
+            Statement::CreateTable(create_statement) => Ok(create_statement.columns),
             _ => bail!("invalid create statement"),
         }
     }

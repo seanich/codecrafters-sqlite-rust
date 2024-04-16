@@ -3,12 +3,20 @@ extern crate peg;
 #[derive(Debug, PartialEq)]
 pub enum Statement {
     Select(SelectStatement),
-    Create(CreateStatement),
+    CreateTable(CreateTableStatement),
+    CreateIndex(CreateIndexStatement),
 }
 
 #[derive(Debug, PartialEq)]
-pub struct CreateStatement {
+pub struct CreateTableStatement {
     pub name: String,
+    pub columns: Vec<String>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct CreateIndexStatement {
+    pub name: String,
+    pub table_name: String,
     pub columns: Vec<String>,
 }
 
@@ -28,7 +36,7 @@ pub struct WhereClause {
 peg::parser! {
     pub grammar sql() for str {
         pub rule sql_statement() -> Statement
-        = _ s:(select_statement() / create_table_statement()) _ { s }
+        = _ s:(select_statement() / create_table_statement() / create_index_statement()) _ { s }
 
         rule select_statement() -> Statement
         = i("SELECT") _ fields:(select() ++ ("," _)) _ i("FROM") _ from:ident() _ w:(where_clause())? {
@@ -48,19 +56,31 @@ peg::parser! {
         }
 
         rule create_table_statement() -> Statement
-        = i("CREATE") _ i("TABLE") _ name:(ident()) _ "(" _ c:(column() ++ ("," _)) _ ")"  {
-            Statement::Create(CreateStatement {
+        = i("CREATE") _ i("TABLE") _ name:(ident()) _ "(" _ c:(column() ++ (_ "," _)) _ ")"  {
+            Statement::CreateTable(CreateTableStatement {
                 name,
+                columns: c.into_iter().collect()
+            })
+        }
+
+        rule create_index_statement() -> Statement
+        = i("CREATE") _ i("INDEX") _ name:(ident()) _ i("ON") _ table_name:(ident()) _ "(" _ c:(ident() ++ (_ "," _)) _ ")"  {
+            Statement::CreateIndex(CreateIndexStatement {
+                name,
+                table_name,
                 columns: c.into_iter().collect()
             })
         }
 
         rule select() -> String = s:(i("COUNT(*)") / ident()) { s }
 
-        rule column() -> String = n:(ident()) _ ident() (_ ident())* { n }
+        rule column() -> String = n:(ident() / quoted_ident()) _ ident() (_ ident())* { n }
 
         rule ident() -> String
-        = "\""? chars:$(alpha() [ 'a'..='z' | 'A'..='Z' | '_' | '0'..='9']*) "\""? { chars.to_string() }
+        = "\""* chars:$(alpha() [ 'a'..='z' | 'A'..='Z' | '_' | '0'..='9']*) "\""* { chars.to_string() }
+
+        rule quoted_ident() -> String
+        = "\"" chars:$(alpha() [ 'a'..='z' | 'A'..='Z' | '_' | '0'..='9' | ' ']*) "\"" { chars.to_string() }
 
         rule alpha() -> String
         = chars:$(['a'..='z' | 'A'..='Z']+) { chars.to_string() }
@@ -158,9 +178,35 @@ fn create_table() {
 
     assert_eq!(
         sql::sql_statement(statement),
-        Ok(Statement::Create(CreateStatement {
+        Ok(Statement::CreateTable(CreateTableStatement {
             name: String::from("foobar"),
             columns: vec![String::from("id"), String::from("name")]
         }))
-    )
+    );
+
+    let statement = r#"
+    CREATE TABLE companies
+(
+        id integer primary key autoincrement
+, name text, domain text, year_founded text, industry text, "size range" text, locality text, country text, current_employees text, total_employees text)
+    "#;
+
+    assert_eq!(
+        sql::sql_statement(statement),
+        Ok(Statement::CreateTable(CreateTableStatement {
+            name: String::from("companies"),
+            columns: vec![
+                String::from("id"),
+                String::from("name"),
+                String::from("domain"),
+                String::from("year_founded"),
+                String::from("industry"),
+                String::from("size range"),
+                String::from("locality"),
+                String::from("country"),
+                String::from("current_employees"),
+                String::from("total_employees"),
+            ]
+        }))
+    );
 }

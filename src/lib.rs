@@ -8,7 +8,7 @@ pub mod db_file;
 mod db_header;
 mod macros;
 pub mod schema_object;
-mod serial_value;
+pub mod serial_value;
 pub mod sql;
 
 pub trait ReadVarint<T> {

@@ -4,7 +4,7 @@ use std::io::Read;
 
 use byteorder::{BigEndian, ReadBytesExt};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// https://www.sqlite.org/fileformat2.html#record_format
 pub enum SerialValue {
     Null,
@@ -50,6 +50,16 @@ impl SerialValue {
                 String::from_utf8(bytes).context("text bytes into String")?
             })),
             _ => unreachable!(),
+        }
+    }
+
+    pub fn as_rowid(&self) -> Option<u64> {
+        match self {
+            Self::Int8(i) => Some(*i as u64),
+            Self::Int16(i) => Some(*i as u64),
+            Self::Int24(i) | Self::Int32(i) => Some(*i as u64),
+            Self::Int48(i) | Self::Int64(i) => Some(*i as u64),
+            _ => None,
         }
     }
 }

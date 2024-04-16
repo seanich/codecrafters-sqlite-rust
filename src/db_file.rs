@@ -1,7 +1,9 @@
 use crate::btree_page::BTreePage;
 use crate::db_header::DBHeader;
-use crate::schema_object::SchemaObject;
-use anyhow::{anyhow, bail, Context};
+use crate::schema_object::{ObjectType, SchemaObject};
+use crate::sql::sql::sql_statement;
+use crate::sql::Statement;
+use anyhow::{anyhow, bail, Context, Result};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
@@ -13,7 +15,7 @@ pub struct DBFile<'a> {
 }
 
 impl<'a> DBFile<'a> {
-    pub fn new(file: &'a mut File) -> anyhow::Result<Self> {
+    pub fn new(file: &'a mut File) -> Result<Self> {
         let mut header = [0; DBHeader::SIZE];
         file.read_exact(&mut header)?;
         let db_header = DBHeader::from_bytes(&header).expect("should parse header");
@@ -32,7 +34,7 @@ impl<'a> DBFile<'a> {
         });
     }
 
-    pub fn schema_for_table(&mut self, table_name: &str) -> anyhow::Result<SchemaObject> {
+    pub fn schema_for_table(&mut self, table_name: &str) -> Result<SchemaObject> {
         self.first_page
             .load_schemas()
             .context("loading schemas")?
@@ -41,7 +43,33 @@ impl<'a> DBFile<'a> {
             .ok_or(anyhow!("failed to find table"))
     }
 
-    fn seek_to_page(&mut self, page: usize) -> anyhow::Result<u64> {
+    pub fn get_index_page(&mut self, table_name: &str, column_name: &str) -> Result<Option<usize>> {
+        let schema_obj = self
+            .first_page
+            .load_schemas()
+            .context("loading schemas")?
+            .into_iter()
+            .filter(|s| s.object_type == ObjectType::Index && s.table_name == table_name)
+            .find(|s| {
+                let statement = sql_statement(&s.sql).expect("parsing index SQL statement");
+                if let Statement::CreateIndex(create_index) = statement {
+                    return create_index
+                        .columns
+                        .into_iter()
+                        .find(|c| c.as_str() == column_name)
+                        .is_some();
+                } else {
+                    false
+                }
+            });
+
+        Ok(match schema_obj {
+            None => None,
+            Some(o) => o.root_page,
+        })
+    }
+
+    fn seek_to_page(&mut self, page: usize) -> Result<u64> {
         let page_offset = page - 1; // pages are 1-indexed
         self.file
             .seek(SeekFrom::Start(
@@ -50,7 +78,7 @@ impl<'a> DBFile<'a> {
             .context("seeking to root page offset")
     }
 
-    pub fn load_page_at(&mut self, page: usize) -> anyhow::Result<BTreePage> {
+    pub fn load_page_at(&mut self, page: usize) -> Result<BTreePage> {
         // Seek to page start
         self.seek_to_page(page)?;
 
@@ -63,7 +91,7 @@ impl<'a> DBFile<'a> {
         BTreePage::new(&buf, None)
     }
 
-    pub fn row_count(&mut self, table_name: &str) -> anyhow::Result<usize> {
+    pub fn row_count(&mut self, table_name: &str) -> Result<usize> {
         // Find the table schema
         let table_schema = match self.schema_for_table(table_name) {
             Ok(s) => s,
