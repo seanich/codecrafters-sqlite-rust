@@ -78,28 +78,24 @@ fn main() -> Result<()> {
                     let mut file = File::open(&args[1])?;
                     let mut db_file = DBFile::new(&mut file).context("constructing DBFile")?;
 
+                    let schema = db_file
+                        .schema_for_table(&s.from)
+                        .context("loading table schema")?;
+
+                    let root_page = db_file
+                        .load_page_at(
+                            schema
+                                .root_page
+                                .context("getting root page from table schema")?,
+                        )
+                        .context("loading root page for table")?;
+
                     if s.select.len() == 1 && s.select[0].eq_ignore_ascii_case("count(*)") {
-                        // Count
-                        // TODO: Make count work with filters
-                        let row_count = db_file
-                            .row_count(&s.from)
-                            .context("finding row count for table")?;
-                        println!("{}", row_count);
+                        // TODO: We don't really need to go and retrieve the rows to get a count
+                        // if there's an index.
+                        println!("{}", select_rows(&mut db_file, root_page, &s)?.len());
                     } else {
-                        // Regular select
-                        let schema = db_file
-                            .schema_for_table(&s.from)
-                            .context("loading table schema")?;
-
-                        let root_page = db_file
-                            .load_page_at(
-                                schema
-                                    .root_page
-                                    .context("getting root page from table schema")?,
-                            )
-                            .context("loading root page for table")?;
-
-                        return execute_select(&mut db_file, &schema, root_page, &s);
+                        return select_and_print(&mut db_file, &schema, root_page, &s);
                     }
                 }
                 Statement::CreateTable(_) | Statement::CreateIndex(_) => {
@@ -112,7 +108,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn execute_select(
+fn select_and_print(
     db_file: &mut DBFile,
     schema: &SchemaObject,
     root_page: BTreePage,
@@ -125,6 +121,36 @@ fn execute_select(
         .map(|col| column_map[col])
         .collect();
 
+    let rows = select_rows(db_file, root_page, select_statement)?;
+    match &select_statement.where_clause {
+        Some(where_clause) => {
+            let where_col_ind = column_map
+                .get(where_clause.column.as_str())
+                .copied()
+                .context("finding index of where column")?;
+            let where_val = where_clause.value.as_str();
+
+            for row in rows {
+                if &row[where_col_ind].to_string() == where_val {
+                    print_row(row, &column_indices)
+                }
+            }
+        }
+        None => {
+            for row in rows {
+                print_row(row, &column_indices)
+            }
+        }
+    };
+
+    Ok(())
+}
+
+fn select_rows(
+    db_file: &mut DBFile,
+    root_page: BTreePage,
+    select_statement: &SelectStatement,
+) -> Result<Vec<Vec<SerialValue>>> {
     // If there is a where clause, try to load an index for the given filter column. If an
     // index is found, load the matching row_id's from the index.
     let index_row_ids: Option<Vec<u64>> = match &select_statement.where_clause {
@@ -145,38 +171,9 @@ fn execute_select(
     };
 
     match index_row_ids {
-        Some(row_ids) => {
-            let rows = select_with_index(db_file, root_page, &row_ids)?;
-            for row in rows {
-                print_row(row, &column_indices)
-            }
-        }
-        None => {
-            let rows = select_without_index(db_file, root_page)?;
-
-            match &select_statement.where_clause {
-                Some(where_clause) => {
-                    let where_col_ind = column_map
-                        .get(where_clause.column.as_str())
-                        .copied()
-                        .context("finding index of where column")?;
-                    let where_val = where_clause.value.as_str();
-
-                    for row in rows {
-                        if &row[where_col_ind].to_string() == where_val {
-                            print_row(row, &column_indices)
-                        }
-                    }
-                }
-                None => {
-                    for row in rows {
-                        print_row(row, &column_indices)
-                    }
-                }
-            };
-        }
-    };
-    Ok(())
+        Some(row_ids) => select_with_index(db_file, root_page, &row_ids),
+        None => select_without_index(db_file, root_page),
+    }
 }
 
 fn select_without_index(db_file: &mut DBFile, page: BTreePage) -> Result<Vec<Vec<SerialValue>>> {
