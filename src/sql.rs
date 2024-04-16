@@ -77,10 +77,13 @@ peg::parser! {
         rule column() -> String = n:(ident() / quoted_ident()) _ ident() (_ ident())* { n }
 
         rule ident() -> String
-        = "\""* chars:$(alpha() [ 'a'..='z' | 'A'..='Z' | '_' | '0'..='9']*) "\""* { chars.to_string() }
+        = iquote()? chars:$(alpha() [ 'a'..='z' | 'A'..='Z' | '_' | '0'..='9']*) iquote()? { chars.to_string() }
 
         rule quoted_ident() -> String
-        = "\"" chars:$(alpha() [ 'a'..='z' | 'A'..='Z' | '_' | '0'..='9' | ' ']*) "\"" { chars.to_string() }
+        = iquote() chars:$(alpha() [ 'a'..='z' | 'A'..='Z' | '_' | '0'..='9' | ' ']*) iquote() { chars.to_string() }
+
+        rule iquote()
+        = ['"' | '`']
 
         rule alpha() -> String
         = chars:$(['a'..='z' | 'A'..='Z']+) { chars.to_string() }
