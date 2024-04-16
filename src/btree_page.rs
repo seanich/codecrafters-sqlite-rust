@@ -78,7 +78,7 @@ pub struct BTreePage {
 impl BTreePage {
     pub fn new(data: &[u8], db_header: Option<DBHeader>) -> Result<Self> {
         let mut cursor = Cursor::new(data);
-        if let Some(_) = db_header {
+        if db_header.is_some() {
             // If this page has the DBHeader skip over it to start reading the page header
             cursor.seek(SeekFrom::Start(DBHeader::SIZE as u64))?;
         }
@@ -179,9 +179,8 @@ impl BTreePage {
         // FIXME: This is a terrible hack. I should actually figure out when it's appropriate to
         // substitute the rowid value for the ID column.
         if let SerialValue::Null = values[0] {
-            match row_id {
-                Some(id) => values[0] = SerialValue::Int64(id as i64),
-                None => {}
+            if let Some(id) = row_id {
+                values[0] = SerialValue::Int64(id as i64);
             }
         }
 

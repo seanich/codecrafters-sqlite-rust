@@ -131,7 +131,7 @@ fn select_and_print(
             let where_val = where_clause.value.as_str();
 
             for row in rows {
-                if &row[where_col_ind].to_string() == where_val {
+                if row[where_col_ind].to_string() == where_val {
                     print_row(row, &column_indices)
                 }
             }
@@ -247,7 +247,7 @@ fn select_with_index(
                         .context("loading next index page")?;
 
                     results.extend(
-                        select_with_index(db_file, next_page, &left_ids)
+                        select_with_index(db_file, next_page, left_ids)
                             .context("loading results from next index page")?,
                     );
                 }
@@ -282,11 +282,10 @@ fn select_with_index(
                 results.push(
                     cells
                         .by_ref()
-                        .skip_while(|c| match c[0].as_rowid() {
-                            Some(rowid) => rowid < id,
+                        .find(|c| match c[0].as_rowid() {
+                            Some(rowid) => rowid == id,
                             None => unreachable!(),
                         })
-                        .next()
                         .context("must have a value")?,
                 );
             }
@@ -365,8 +364,8 @@ fn search_index(db_file: &mut DBFile, page: BTreePage, query: &str) -> Result<Ve
             Ok(page
                 .read_cells()?
                 .into_iter()
-                .filter(|c| &c[0].to_string() == query)
-                .map(|c| c[1].as_rowid().unwrap_or_else(|| 0u64))
+                .filter(|c| c[0].to_string() == query)
+                .map(|c| c[1].as_rowid().unwrap_or(0u64))
                 .collect())
         }
         _ => unreachable!(),
@@ -374,5 +373,5 @@ fn search_index(db_file: &mut DBFile, page: BTreePage, query: &str) -> Result<Ve
 }
 
 fn print_row(row: Vec<SerialValue>, indices: &[usize]) {
-    println!("{}", indices.into_iter().map(|ind| &row[*ind]).join("|"))
+    println!("{}", indices.iter().map(|ind| &row[*ind]).join("|"))
 }

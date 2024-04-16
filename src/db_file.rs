@@ -27,11 +27,11 @@ impl<'a> DBFile<'a> {
         file.read_exact(&mut page)?;
         let page = BTreePage::new(&page, Some(db_header)).expect("should construct BTree page");
 
-        return Ok(Self {
+        Ok(Self {
             file,
             header: db_header,
             first_page: page,
-        });
+        })
     }
 
     pub fn schema_for_table(&mut self, table_name: &str) -> Result<SchemaObject> {
@@ -56,8 +56,7 @@ impl<'a> DBFile<'a> {
                     return create_index
                         .columns
                         .into_iter()
-                        .find(|c| c.as_str() == column_name)
-                        .is_some();
+                        .any(|c| c.as_str() == column_name);
                 } else {
                     false
                 }

@@ -64,7 +64,7 @@ impl DBHeader {
         }
 
         let header = data as *const [u8] as *const Self;
-        Ok(unsafe { *header.clone() })
+        Ok(unsafe { *header })
     }
 
     field_decoder! {u16; page_size}
