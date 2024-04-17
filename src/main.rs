@@ -6,12 +6,10 @@ use itertools::Itertools;
 
 use sqlite_starter_rust::btree_page::{BTreePage, InteriorCell, PageType};
 use sqlite_starter_rust::db_file::DBFile;
-use sqlite_starter_rust::schema_object::{ObjectType, SchemaObject};
+use sqlite_starter_rust::schema_object::SchemaObject;
 use sqlite_starter_rust::serial_value::SerialValue;
 use sqlite_starter_rust::sql::sql::sql_statement;
 use sqlite_starter_rust::sql::{SelectStatement, Statement};
-
-const SQLITE_TABLE_PREFIX: &str = "sqlite_";
 
 fn main() -> Result<()> {
     // Parse arguments
@@ -22,62 +20,36 @@ fn main() -> Result<()> {
         _ => {}
     }
 
+    let mut file = File::open(&args[1])?;
+    let mut db_file = DBFile::new(&mut file).context("constructing DBFile")?;
+
     // Parse command and act accordingly
     let command = &args[2];
     match command.as_str() {
         ".dbinfo" => {
-            let mut file = File::open(&args[1])?;
-            let db_file = DBFile::new(&mut file).context("constructing DBFile")?;
-
             println!("database page size: {}", db_file.header.page_size());
             println!("number of tables: {}", db_file.first_page.num_cells);
         }
         ".tables" => {
-            let mut file = File::open(&args[1])?;
-            let db_file = DBFile::new(&mut file).context("constructing DBFile")?;
-
-            let mut table_names = vec![];
-            for schema_obj in db_file.first_page.load_schemas().context("load schemas")? {
-                if ObjectType::Table == schema_obj.object_type
-                    && !schema_obj.table_name.starts_with(SQLITE_TABLE_PREFIX)
-                {
-                    table_names.push(schema_obj.table_name);
-                }
-            }
-            println!("{}", table_names.join(" "));
+            println!(
+                "{}",
+                db_file.table_objects()?.map(|obj| obj.table_name).join(" ")
+            );
         }
-        ".tableslong" => {
-            let mut file = File::open(&args[1])?;
-            let db_file = DBFile::new(&mut file).context("constructing DBFile")?;
-
-            for schema_obj in db_file.first_page.load_schemas().context("load schemas")? {
-                if ObjectType::Table == schema_obj.object_type
-                    && !schema_obj.table_name.starts_with(SQLITE_TABLE_PREFIX)
-                {
-                    println!("{}: {}", schema_obj.table_name, schema_obj.sql);
-                }
+        ".tables-long" => {
+            for table in db_file.table_objects()? {
+                println!("{}: {}", table.table_name, table.sql);
             }
         }
         ".indexes" => {
-            let mut file = File::open(&args[1])?;
-            let db_file = DBFile::new(&mut file).context("constructing DBFile")?;
-
-            for schema_obj in db_file.first_page.load_schemas().context("load schemas")? {
-                if ObjectType::Index == schema_obj.object_type {
-                    println!(
-                        "{} on {}:\n\t{}",
-                        schema_obj.name, schema_obj.table_name, schema_obj.sql
-                    )
-                }
+            for index in db_file.index_objects()? {
+                println!("{} on {}:\n\t{}", index.name, index.table_name, index.sql)
             }
         }
         command => {
             let statement = sql_statement(command).context("parsing SQL statement")?;
             match statement {
                 Statement::Select(s) => {
-                    let mut file = File::open(&args[1])?;
-                    let mut db_file = DBFile::new(&mut file).context("constructing DBFile")?;
-
                     let schema = db_file
                         .schema_for_table(&s.from)
                         .context("loading table schema")?;
@@ -91,8 +63,8 @@ fn main() -> Result<()> {
                         .context("loading root page for table")?;
 
                     if s.select.len() == 1 && s.select[0].eq_ignore_ascii_case("count(*)") {
-                        // TODO: We don't really need to go and retrieve the rows to get a count
-                        // if there's an index.
+                        // TODO: We don't really need to go and retrieve the rows to get a count if
+                        // there's an index.
                         println!("{}", select_rows(&mut db_file, root_page, &s)?.len());
                     } else {
                         return select_and_print(&mut db_file, &schema, root_page, &s);
@@ -110,11 +82,11 @@ fn main() -> Result<()> {
 
 fn select_and_print(
     db_file: &mut DBFile,
-    schema: &SchemaObject,
+    table: &SchemaObject,
     root_page: BTreePage,
     select_statement: &SelectStatement,
 ) -> Result<()> {
-    let column_map = schema.column_map().context("retrieving column order")?;
+    let column_map = table.column_map().context("retrieving column order")?;
     let column_indices: Vec<usize> = select_statement
         .select
         .iter()

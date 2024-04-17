@@ -3,9 +3,11 @@ use crate::db_header::DBHeader;
 use crate::schema_object::{ObjectType, SchemaObject};
 use crate::sql::sql::sql_statement;
 use crate::sql::Statement;
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+
+const SQLITE_TABLE_PREFIX: &str = "sqlite_";
 
 pub struct DBFile<'a> {
     file: &'a mut File,
@@ -34,22 +36,36 @@ impl<'a> DBFile<'a> {
         })
     }
 
-    pub fn schema_for_table(&mut self, table_name: &str) -> Result<SchemaObject> {
-        self.first_page
+    pub fn schema_objects(&self) -> Result<impl Iterator<Item = SchemaObject>> {
+        Ok(self
+            .first_page
             .load_schemas()
-            .context("loading schemas")?
-            .into_iter()
-            .find(|s| s.table_name == table_name)
-            .ok_or(anyhow!("failed to find table"))
+            .context("load schema objects")?
+            .into_iter())
+    }
+
+    pub fn table_objects(&self) -> Result<impl Iterator<Item = SchemaObject>> {
+        Ok(self.schema_objects()?.filter(|obj| {
+            obj.object_type == ObjectType::Table && !obj.table_name.starts_with(SQLITE_TABLE_PREFIX)
+        }))
+    }
+
+    pub fn index_objects(&self) -> Result<impl Iterator<Item = SchemaObject>> {
+        Ok(self
+            .schema_objects()?
+            .filter(|obj| obj.object_type == ObjectType::Index))
+    }
+
+    pub fn schema_for_table(&mut self, table_name: &str) -> Result<SchemaObject> {
+        self.table_objects()?
+            .find(|t| t.table_name == table_name)
+            .ok_or(anyhow!("table not found"))
     }
 
     pub fn get_index_page(&mut self, table_name: &str, column_name: &str) -> Result<Option<usize>> {
         let schema_obj = self
-            .first_page
-            .load_schemas()
-            .context("loading schemas")?
-            .into_iter()
-            .filter(|s| s.object_type == ObjectType::Index && s.table_name == table_name)
+            .index_objects()?
+            .filter(|s| s.table_name == table_name)
             .find(|s| {
                 let statement = sql_statement(&s.sql).expect("parsing index SQL statement");
                 if let Statement::CreateIndex(create_index) = statement {
@@ -90,18 +106,15 @@ impl<'a> DBFile<'a> {
         BTreePage::new(&buf, None)
     }
 
-    pub fn row_count(&mut self, table_name: &str) -> Result<usize> {
-        // Find the table schema
-        let table_schema = match self.schema_for_table(table_name) {
-            Ok(s) => s,
-            Err(_) => bail!("could not find table with name '{}'", table_name),
-        };
+    pub fn load_table(&mut self, table_name: &str) -> Result<(SchemaObject, BTreePage)> {
+        let schema = self
+            .schema_for_table(table_name)
+            .with_context(|| format!("searching for table with name '{}'", table_name))?;
 
         let page = self
-            .load_page_at(table_schema.root_page.context("getting root page offset")?)
-            .context("loading BTree page")?;
+            .load_page_at(schema.root_page.context("getting root page offset")?)
+            .with_context(|| format!("loading BTreePage for table '{}'", table_name))?;
 
-        // Get number of cells (i.e. row count)
-        Ok(page.num_cells as usize)
+        Ok((schema, page))
     }
 }

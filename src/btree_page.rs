@@ -100,7 +100,7 @@ impl BTreePage {
         }
 
         Ok(Self {
-            page_data: data.to_vec(),
+            page_data: data.to_owned(),
             db_header,
             page_type,
             first_freeblock,
@@ -119,30 +119,26 @@ impl BTreePage {
             .context("read left child pointer")?;
 
         match self.page_type {
-            PageType::InteriorTable => {
-                let row_id = reader.read_varint().context("read rowid")?;
-                Ok(InteriorCell::Table(InteriorTableCell {
-                    left_child_page,
-                    row_id,
-                }))
-            }
+            PageType::InteriorTable => Ok(InteriorCell::Table(InteriorTableCell {
+                row_id: reader.read_varint().context("read rowid")?,
+                left_child_page,
+            })),
             PageType::InteriorIndex => {
                 let _payload_bytes = reader.read_varint().context("read payload bytes")?;
-
                 let payload = read_payload(&mut reader)?;
 
                 let Some((rowid, columns)) = payload.split_last() else {
                     bail!("interior index cell should have at least two values")
                 };
+
                 let Some(rowid) = rowid.as_rowid() else {
                     bail!("last interior index cell value must be a rowid")
                 };
-                let columns = columns.to_vec();
 
                 Ok(InteriorCell::Index(InteriorIndexCell {
                     left_child_page,
                     rowid,
-                    columns,
+                    columns: columns.to_owned(),
                 }))
             }
             PageType::LeafTable | PageType::LeafIndex => {
@@ -159,7 +155,7 @@ impl BTreePage {
             let cell = self
                 .read_interior_cell(cell_data)
                 .context("reading cell data")?;
-            result.push(cell);
+            result.push(cell)
         }
         Ok(result)
     }

@@ -6,7 +6,6 @@ use byteorder::ReadBytesExt;
 pub mod btree_page;
 pub mod db_file;
 mod db_header;
-mod macros;
 pub mod schema_object;
 pub mod serial_value;
 pub mod sql;

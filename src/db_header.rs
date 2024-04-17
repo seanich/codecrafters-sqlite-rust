@@ -1,4 +1,3 @@
-use crate::field_decoder;
 use anyhow::{bail, Result};
 
 /// https://www.sqlite.org/fileformat.html#the_database_header
@@ -53,6 +52,14 @@ pub struct DBHeader {
     version_valid_for: [u8; 4],
     /// SQLITE_VERSION_NUMBER
     version_number: [u8; 4],
+}
+
+macro_rules! field_decoder {
+    ($type:ty; $name:ident) => {
+        pub fn $name(&self) -> $type {
+            <$type>::from_be_bytes(self.$name)
+        }
+    };
 }
 
 impl DBHeader {
